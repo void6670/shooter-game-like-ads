@@ -12,9 +12,9 @@ export const GUNS = [
 ];
 
 export const UPGRADES = {
-  damage:   { name: 'Damage',    icon: '💥', base: 40,  growth: 1.42 },
+  damage:   { name: 'Damage',    icon: '💥', base: 40,  growth: 1.5 },
   rate:     { name: 'Fire Rate', icon: '⚡', base: 60,  growth: 1.5, max: 25 },
-  soldiers: { name: 'Soldiers',  icon: '🪖', base: 120, growth: 2.1, max: 9 },
+  soldiers: { name: 'Soldiers',  icon: '🪖', base: 120, growth: 2.1, max: 14 },
   income:   { name: 'Income',    icon: '💰', base: 80,  growth: 1.55 },
 };
 

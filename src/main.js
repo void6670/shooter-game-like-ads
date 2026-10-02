@@ -11,8 +11,10 @@ import { save, persist, GUNS, UPGRADES, upgradeCost, isMaxed, stats, fmt } from 
 const RUN_SPEED = 6.5;
 const BULLET_SPEED = 46;
 const BULLET_RANGE = 40;
-const MAX_SOLDIERS = 50;
-const MAX_BULLETS = 2000;
+const SPACING = 0.42;       // gap between soldiers in the crowd
+const CROWD_HALF = 4.3;     // widest the crowd spreads before it stretches into a column
+const FIRE_EMITTERS = 90;   // above this many soldiers, fewer fire but each shot hits harder
+const MAX_BULLETS = 4000;
 const MAX_PARTICLES = 900;
 const ROAD_HALF = 4.9;
 const ENDLESS_BOSS_GAP = 420;   // metres between endless bosses
@@ -141,6 +143,7 @@ function newLabel(w, h, opts) {
 }
 
 function buildLevel(mode = 'level') {
+  if (crowd) for (const p of crowd.parts) p.inst?.dispose();
   if (world) {
     world.traverse((o) => { if (o.userData.bridge) disposeBridge(o); });
     scene.remove(world);
@@ -168,6 +171,7 @@ function buildLevel(mode = 'level') {
     time: 0, shake: 0, endTimer: -1, cleanT: 0,
   };
   bulletMesh.material.color.set(st.gun.bullet);
+  buildCrowd(st.gun);
 
   if (endless) {
     G.world = WORLDS[0];
@@ -186,7 +190,7 @@ function buildLevel(mode = 'level') {
   }
   applyWorld(G.world);
   for (let i = 0; i < st.startSoldiers; i++) addSoldier();
-  for (const s of G.soldiers) { const p = slot(G.soldiers.indexOf(s)); s.x = p.x; s.z = p.z; }
+  G.soldiers.forEach((s, i) => { const p = slot(i, G.soldiers.length); s.x = p.x; s.z = p.z; s.pop = 1; });
 
   snapCamera();
   $('bossBar').classList.remove('show');
@@ -269,27 +273,64 @@ function cleanup() {
 }
 
 // ---------------------------------------------------------------- soldiers
-const SLOTS = [];
-for (let i = 0; i < MAX_SOLDIERS; i++) {
-  const r = 0.62 * Math.sqrt(i);
-  const a = i * 2.39996;
-  SLOTS.push({ x: r * Math.cos(a), z: r * Math.sin(a) * 0.85 });
+// Soldiers are drawn with one InstancedMesh per body part, so the squad can grow without limit.
+let crowd = null;
+
+function buildCrowd(gun) {
+  const template = buildHumanoid(PALETTES.soldier, gun);
+  const parts = [];
+  template.traverse((o) => { if (o.isMesh) parts.push({ src: o, inst: null }); });
+  crowd = { template, rig: template.userData.rig, parts, cap: 0 };
+  growCrowd(128);
 }
-function slot(i) { return SLOTS[i] || SLOTS[0]; }
-function squadRadius() { return 0.62 * Math.sqrt(Math.max(0, G.soldiers.length - 1)) + 0.35; }
+
+function growCrowd(cap) {
+  for (const p of crowd.parts) {
+    if (p.inst) { world.remove(p.inst); p.inst.dispose(); }
+    p.inst = new THREE.InstancedMesh(p.src.geometry, p.src.material, cap);
+    p.inst.frustumCulled = false;
+    p.inst.count = 0;
+    p.inst.renderOrder = p.src.renderOrder;
+    world.add(p.inst);
+  }
+  crowd.cap = cap;
+}
+
+function drawCrowd(running) {
+  const n = G.soldiers.length;
+  if (n > crowd.cap) growCrowd(Math.max(n, crowd.cap * 2));
+  const t = crowd.template;
+  for (let i = 0; i < n; i++) {
+    const s = G.soldiers[i];
+    t.position.set(s.x, G.state === 'win' ? Math.abs(Math.sin(G.time * 7 + i)) * 0.6 : 0, s.z);
+    t.scale.setScalar(0.3 + 0.7 * s.pop + Math.sin(s.pop * Math.PI) * 0.25);
+    animateRig(crowd.rig, s.phase, G.state === 'win' ? 0 : running ? 1 : 0.15);
+    t.updateMatrixWorld(true);
+    for (const p of crowd.parts) p.inst.setMatrixAt(i, p.src.matrixWorld);
+  }
+  for (const p of crowd.parts) {
+    p.inst.count = n;
+    p.inst.instanceMatrix.needsUpdate = true;
+  }
+}
+
+/** Sunflower packing; once wider than the road the crowd stretches back into a column. */
+function slot(i, n) {
+  const r = SPACING * Math.sqrt(i);
+  const a = i * 2.39996;
+  const rMax = SPACING * Math.sqrt(n);
+  const sx = Math.min(1, CROWD_HALF / Math.max(rMax, 0.001));
+  const sz = 1 / sx;
+  const shift = rMax * (sz - 1); // keep the front edge in place, grow backwards
+  return { x: r * Math.cos(a) * sx, z: r * Math.sin(a) * sz + shift };
+}
+function squadRadius() { return Math.min(CROWD_HALF, SPACING * Math.sqrt(G.soldiers.length)) + 0.3; }
 
 function addSoldier() {
-  if (G.soldiers.length >= MAX_SOLDIERS) return false;
-  const g = buildHumanoid(PALETTES.soldier, G.st.gun);
-  const s = {
-    g, rig: g.userData.rig,
+  G.soldiers.push({
     x: G.sx + (Math.random() - 0.5), z: G.sz + (Math.random() - 0.5),
     fire: Math.random() / G.st.rate, phase: Math.random() * 6, pop: 0,
-  };
-  g.position.set(s.x, 0, s.z);
-  g.scale.setScalar(0.01);
-  world.add(g);
-  G.soldiers.push(s);
+  });
   return true;
 }
 
@@ -297,7 +338,6 @@ function killSoldier(i, fling = false) {
   const s = G.soldiers[i];
   if (!s) return;
   G.soldiers.splice(i, 1);
-  world.remove(s.g);
   burst(s.x, 0.9, s.z, [0x3ccf4a, 0x5f7d48, 0xffffff], fling ? 22 : 12, fling ? 8 : 4);
   if (G.soldiers.length === 0) fail();
 }
@@ -317,48 +357,50 @@ function nearestSoldier(x, z) {
   return { i: best, d: Math.sqrt(bd) };
 }
 
+/** How far the squad centre can go: small squads reach the rail, big ones still get well into a side lane. */
+function sxLimit() {
+  return Math.max(3.3, ROAD_HALF - squadRadius() + 0.2);
+}
+
 function updateSoldiers(dt, firing, running) {
   const n = G.soldiers.length;
-  const k = 1 - Math.exp(-dt * 10);
+  const k = 1 - Math.exp(-dt * 16);
   const rate = G.st.rate * G.rateMult;
+  // with a huge crowd only some soldiers fire, each shot scaled up so total damage stays the same
+  const fireChance = Math.min(1, FIRE_EMITTERS / Math.max(1, n));
+  const dmgScale = 1 / fireChance;
   for (let i = 0; i < n; i++) {
     const s = G.soldiers[i];
-    const p = slot(i);
-    const tx = THREE.MathUtils.clamp(G.sx + p.x, -ROAD_HALF - 0.2, ROAD_HALF + 0.2);
+    const p = slot(i, n);
+    const tx = THREE.MathUtils.clamp(G.sx + p.x, -ROAD_HALF + 0.1, ROAD_HALF - 0.1);
     s.x += (tx - s.x) * k;
     s.z += (G.sz + p.z - s.z) * k;
     s.pop = Math.min(1, s.pop + dt * 5);
-    s.g.position.set(s.x, 0, s.z);
-    s.g.scale.setScalar(0.3 + 0.7 * s.pop + Math.sin(s.pop * Math.PI) * 0.25);
     s.phase += dt * (running ? 11 : 3);
-    if (G.state === 'win') {
-      s.g.position.y = Math.abs(Math.sin(G.time * 7 + i)) * 0.6;
-      animateRig(s.rig, s.phase, 0);
-    } else {
-      animateRig(s.rig, s.phase, running ? 1 : 0.15);
-    }
 
     if (firing) {
       s.fire -= dt;
       if (s.fire < -0.5) s.fire = 0;
       while (s.fire <= 0) {
         s.fire += (1 / rate) * (0.85 + Math.random() * 0.3);
+        if (Math.random() > fireChance) continue;
         // fire straight ahead, angled slightly in toward the squad's center so shots group in the middle
         const aim = ((G.sx - s.x) / 24) * 0.8;
         for (let b = 0; b < G.st.bullets; b++) {
           const off = G.st.bullets > 1 ? (b - (G.st.bullets - 1) / 2) * G.st.spread : 0;
           const jitter = (Math.random() - 0.5) * (0.07 + G.st.spread);
-          spawnBullet(s.x + 0.1, s.z - 1.1, (aim + off + jitter) * BULLET_SPEED);
+          spawnBullet(s.x + 0.1, s.z - 1.1, (aim + off + jitter) * BULLET_SPEED, dmgScale);
         }
       }
     }
   }
+  drawCrowd(running);
 }
 
 // ---------------------------------------------------------------- bullets & hits
-function spawnBullet(x, z, vx) {
+function spawnBullet(x, z, vx, scale = 1) {
   if (bullets.length >= MAX_BULLETS) return;
-  bullets.push({ x, z, pz: z, vx, life: BULLET_RANGE / BULLET_SPEED, dmg: G.st.damage * G.dmgMult });
+  bullets.push({ x, z, pz: z, vx, life: BULLET_RANGE / BULLET_SPEED, dmg: G.st.damage * G.dmgMult * scale });
 }
 
 function gatherTargets() {
@@ -422,7 +464,8 @@ function onHit(t, b) {
       break;
     case 'half':
       if (o.op === 'add') {
-        o.val = Math.min(60, o.val + (o.val < 0 ? 1 : 0.25));
+        // shooting raises a gate, but only so far: bad gates top out at +8, good ones at about double
+        o.val = Math.min(o.max, o.val + (o.val < 0 ? 1 : 0.25));
         refreshHalf(o);
       }
       o.flash = 0.08;
@@ -495,7 +538,7 @@ function addGates(ev) {
     label.mesh.position.set(0, 1.35, 0.05);
     g.add(label.mesh);
     world.add(g);
-    const half = { x0, x1, op: h.op, val: h.val, g, label, flash: 0 };
+    const half = { x0, x1, op: h.op, val: h.val, max: h.val > 0 ? h.val * 2 + 4 : 8, g, label, flash: 0 };
     refreshHalf(half);
     gate.halves.push(half);
   });
@@ -503,9 +546,10 @@ function addGates(ev) {
 }
 
 function refreshHalf(h) {
-  const good = h.op === 'mul' || h.val > 0;
+  const good = h.op === 'mul' || (h.op === 'add' && h.val > 0);
   setGateColor(h.g, good);
   if (h.op === 'mul') h.label.set('x' + h.val);
+  else if (h.op === 'div') h.label.set('÷' + h.val);
   else {
     const v = Math.trunc(h.val);
     h.label.set((v > 0 ? '+' : '') + v);
@@ -534,13 +578,15 @@ function checkGates() {
     if (h.op === 'mul') {
       const add = before * (h.val - 1);
       for (let i = 0; i < add; i++) addSoldier();
+    } else if (h.op === 'div') {
+      removeSoldiers(before - Math.ceil(before / h.val));
     } else {
       const v = Math.trunc(h.val);
       if (v > 0) for (let i = 0; i < v; i++) addSoldier();
       else removeSoldiers(-v);
     }
     const delta = G.soldiers.length - before;
-    const good = h.op === 'mul' || h.val > 0;
+    const good = h.op === 'mul' || (h.op === 'add' && h.val > 0);
     floatText((delta >= 0 ? '+' : '') + delta, G.sx, 3, G.sz - 1, { fill: good ? '#6dff6d' : '#ff5b4d', height: 1.4, life: 1.1 });
     for (const x of gate.halves) fadeOut(x.g);
   }
@@ -887,8 +933,7 @@ function update(dt) {
     if (keys.left) G.sx -= 9 * dt;
     if (keys.right) G.sx += 9 * dt;
   }
-  const lim = Math.max(0, ROAD_HALF - Math.min(squadRadius(), ROAD_HALF) * 0.85);
-  G.sx = THREE.MathUtils.clamp(G.sx, -lim, lim);
+  G.sx = THREE.MathUtils.clamp(G.sx, -sxLimit(), sxLimit());
 
   updateSoldiers(dt, fighting, running);
   updateBullets(dt, fighting);
@@ -988,7 +1033,10 @@ const lookWant = new THREE.Vector3();
 
 function cameraTargets() {
   const boss = G.state === 'boss' || (G.state === 'win' && G.boss && G.sz <= G.endZ);
-  camWant.set(G.sx * 0.45, boss ? 11.5 : 9.3, G.sz + (boss ? 12.5 : 10.2));
+  // pull back as the crowd grows so the whole squad stays on screen
+  const n = G.soldiers.length;
+  const back = Math.min(9, Math.max(0, SPACING * Math.sqrt(n) - 2.2) * 1.1);
+  camWant.set(G.sx * 0.45, (boss ? 11.5 : 9.3) + back * 0.7, G.sz + (boss ? 12.5 : 10.2) + back);
   lookWant.set(G.sx * 0.3, 0.5, G.sz - (boss ? 14 : 12));
 }
 
@@ -1169,11 +1217,14 @@ let drag = null;
 
 app.addEventListener('pointerdown', (e) => {
   if (e.target !== canvas && e.target.closest('button, .panel')) return;
-  drag = { x: e.clientX, sx: G ? G.sx : 0 };
+  drag = { x: e.clientX };
 });
 window.addEventListener('pointermove', (e) => {
   if (!drag || !G || paused) return;
-  G.sx = drag.sx + (e.clientX - drag.x) / app.clientWidth * 12;
+  // relative drag: the squad follows your finger 1:1 across the road and never gets "stuck" past the edge
+  const dx = (e.clientX - drag.x) / app.clientWidth * 13;
+  drag.x = e.clientX;
+  G.sx = THREE.MathUtils.clamp(G.sx + dx, -sxLimit(), sxLimit());
 });
 window.addEventListener('pointerup', () => { drag = null; });
 window.addEventListener('pointercancel', () => { drag = null; });

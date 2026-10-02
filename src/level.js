@@ -29,7 +29,7 @@ function mulberry32(a) {
 }
 
 export function difficulty(level) {
-  return Math.pow(1.28, level - 1);
+  return Math.pow(1.32, level - 1);
 }
 
 export function bossFor(level) {
@@ -38,7 +38,7 @@ export function bossFor(level) {
   return {
     type: BOSS_ORDER[(Math.round(level) - 1) % BOSS_ORDER.length],
     mega,
-    hp: Math.round(1100 * D * (mega ? 1.7 : 1) * (level <= 1 ? 0.5 : 1)),
+    hp: Math.round(1600 * D * (mega ? 1.7 : 1) * (level <= 1 ? 0.4 : 1)),
   };
 }
 
@@ -69,7 +69,7 @@ export function createGenerator(seed) {
         gen.events.push({
           type: 'obstacle', kind: crate ? 'crate' : 'barrel',
           x: move ? 0 : x + (r() - 0.5) * 0.6, z: z - row * 6, move, movePhase: r() * 6,
-          hp: r5((crate ? rint(25, 50) : opening ? rint(15, 30) : rint(15, 45) + row * 30) * D()),
+          hp: r5((crate ? rint(30, 60) : opening ? rint(15, 30) : rint(20, 60) + row * 35) * D()),
         });
         if (move) break; // one slider per row keeps a path open
       }
@@ -81,32 +81,35 @@ export function createGenerator(seed) {
     const good = r() < 0.15 && level > 2
       ? { op: 'mul', val: 2 }
       : { op: 'add', val: level === 1 ? rint(3, 5) : rint(2, 3 + Math.min(level, 6)) };
-    const bad = r() < 0.12
-      ? { op: 'add', val: rint(1, 2) }
-      : { op: 'add', val: -rint(8, 18 + Math.min(level, 20) * 5) };
+    const roll = r();
+    const bad = level >= 3 && roll < 0.3
+      ? { op: 'div', val: level >= 8 && r() < 0.4 ? 3 : 2 }
+      : roll < 0.38
+        ? { op: 'add', val: rint(1, 2) }
+        : { op: 'add', val: -rint(10, 22 + Math.min(level, 25) * 7) };
     const flip = r() < 0.5;
     gen.events.push({ type: 'gates', z, left: flip ? good : bad, right: flip ? bad : good });
   };
 
   const enemies = (z) => {
     const level = L();
-    const count = level === 1 ? 8 + rint(0, 4) : Math.min(10 + level * 3 + rint(0, 8), 50);
+    const count = level === 1 ? 9 + rint(0, 4) : Math.min(12 + level * 4 + rint(0, 10), 70);
     const list = [];
     for (let i = 0; i < count; i++) {
       const roll = r();
       const kind = level >= 4 && roll < 0.18 ? 'runner' : level > 1 && roll < 0.6 ? 'goblin' : 'zombie';
-      const hp = { zombie: 5, goblin: 8, runner: 3 }[kind];
+      const hp = { zombie: 6, goblin: 10, runner: 4 }[kind];
       list.push({ kind, x: (r() - 0.5) * 8.6, z: z - r() * 10, hp: Math.ceil(hp * D()) });
     }
     const brutes = level > 1 ? (r() < 0.6 ? 1 : 0) + (level > 5 && r() < 0.5 ? 1 : 0) : 0;
     for (let b = 0; b < brutes; b++) {
-      list.push({ kind: 'brute', x: (r() - 0.5) * 6, z: z - 11 - b * 3, hp: Math.ceil(90 * D()) });
+      list.push({ kind: 'brute', x: (r() - 0.5) * 6, z: z - 11 - b * 3, hp: Math.ceil(120 * D()) });
     }
     gen.events.push({ type: 'enemies', z, list });
   };
 
   const tires = (z) => {
-    const base = rint(55, 110) * D();
+    const base = rint(70, 140) * D();
     LANES.forEach((x, i) => gen.events.push({ type: 'obstacle', kind: 'tires', x, z, hp: r5(base * (1 + i * 0.07)) }));
     gates(z - 4.5);
   };
