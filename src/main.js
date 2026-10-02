@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import '@fontsource/lilita-one';
 import {
   buildHumanoid, animateRig, buildBoss, buildBarrel, buildCrate, buildTires, buildGatePanel, setGateColor,
-  buildBridge, coinGeo, coinMat, PALETTES, BOSSES,
+  buildBridge, coinGeo, coinMat, PALETTES, BOSSES, mat,
 } from './models.js';
 import { Label, textSprite } from './text.js';
 import { generateLevel } from './level.js';
@@ -11,7 +11,7 @@ import { save, persist, GUNS, UPGRADES, upgradeCost, isMaxed, stats, fmt } from 
 const RUN_SPEED = 6.5;
 const BULLET_SPEED = 46;
 const BULLET_RANGE = 40;
-const MAX_SOLDIERS = 60;
+const MAX_SOLDIERS = 50;
 const MAX_BULLETS = 2000;
 const MAX_PARTICLES = 900;
 const ROAD_HALF = 4.9;
@@ -244,10 +244,12 @@ function updateSoldiers(dt, firing, running) {
       if (s.fire < -0.5) s.fire = 0;
       while (s.fire <= 0) {
         s.fire += (1 / rate) * (0.85 + Math.random() * 0.3);
-        const aim = aimAt(s);
+        // fire straight ahead, angled slightly in toward the squad's center so shots group in the middle
+        const aim = ((G.sx - s.x) / 24) * 0.8;
         for (let b = 0; b < G.st.bullets; b++) {
-          const off = G.st.bullets > 1 ? (b - (G.st.bullets - 1) / 2) * G.st.spread : (Math.random() - 0.5) * G.st.spread;
-          spawnBullet(s.x + 0.1, s.z - 1.1, (aim + off) * BULLET_SPEED);
+          const off = G.st.bullets > 1 ? (b - (G.st.bullets - 1) / 2) * G.st.spread : 0;
+          const jitter = (Math.random() - 0.5) * (0.07 + G.st.spread);
+          spawnBullet(s.x + 0.1, s.z - 1.1, (aim + off + jitter) * BULLET_SPEED);
         }
       }
     }
@@ -255,24 +257,6 @@ function updateSoldiers(dt, firing, running) {
 }
 
 // ---------------------------------------------------------------- bullets & hits
-/** Slight auto-aim: steer toward the closest enemy inside a narrow forward cone. */
-function aimAt(s) {
-  let best = null, bd = Infinity;
-  for (const e of G.enemies) {
-    if (!e.alive) continue;
-    const dz = s.z - e.z;
-    if (dz < 1 || dz > 30) continue;
-    const slope = (e.x - s.x) / dz;
-    if (Math.abs(slope) > 0.4) continue;
-    if (dz < bd) { bd = dz; best = slope; }
-  }
-  if (best === null && G.boss && G.boss.alive && G.boss.active) {
-    const dz = s.z - G.boss.z;
-    if (dz > 1) best = THREE.MathUtils.clamp((G.boss.x - s.x) / dz, -0.4, 0.4);
-  }
-  return best ?? 0;
-}
-
 function spawnBullet(x, z, vx) {
   if (bullets.length >= MAX_BULLETS) return;
   bullets.push({ x, z, pz: z, vx, life: BULLET_RANGE / BULLET_SPEED, dmg: G.st.damage * G.dmgMult });
@@ -479,7 +463,7 @@ function addEnemy(e) {
   world.add(g);
   const en = {
     kind: e.kind, x: e.x, z: e.z, hp: e.hp, maxHp: e.hp, g, rig: g.userData.rig,
-    r: brute ? 0.75 : 0.38, speed: brute ? 1.5 : 1.8 + Math.random() * 0.8,
+    r: brute ? 0.75 : 0.38, speed: brute ? 1.8 : 2.2 + Math.random() * 1.0,
     active: false, alive: true, phase: Math.random() * 6, punch: 0, scale: brute ? 1.7 : 1, bar: null,
   };
   if (brute) en.bar = hpBar(g, 2.15, 0.9);
@@ -570,7 +554,7 @@ function addBoss(cfg) {
   G.boss = {
     name: (cfg.mega ? 'MEGA ' : '') + def.name, g, rig: g.userData.rig,
     hp: cfg.hp, maxHp: cfg.hp, x: 0, z, r: 0.42 * scale, scale,
-    alive: true, active: false, attackT: 1, swing: 0, phase: 0, punch: 0,
+    alive: true, active: false, attackT: 1.2, swing: 0, phase: 0, punch: 0, atk: null,
   };
 }
 
@@ -582,39 +566,126 @@ function startBoss() {
   showBanner('BOSS FIGHT!', 'red');
 }
 
+const LANE_X = [-3.3, 0, 3.3];
+const LANE_HALF = 1.7;
+const warnMat = () => new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, opacity: 0.35, depthWrite: false });
+const boulderGeo = new THREE.DodecahedronGeometry(0.9, 0);
+
+function bossFront() {
+  let front = Infinity;
+  for (const s of G.soldiers) front = Math.min(front, s.z);
+  return front;
+}
+
+function startBossAttack(b) {
+  const L = G.level;
+  const front = bossFront();
+  const dur = Math.max(0.6, 1.15 - L * 0.03) * (b.hp < b.maxHp * 0.4 ? 0.8 : 1);
+  const type = L === 1 || Math.random() < 0.55 ? 'slam' : 'throw';
+  const a = { type, t: 0, dur, marks: [] };
+  if (type === 'slam') {
+    // smash the lane the squad is in; from level 4 sometimes two lanes, always leaving one safe
+    const near = LANE_X.reduce((bi, x, i) => (Math.abs(x - G.sx) < Math.abs(LANE_X[bi] - G.sx) ? i : bi), 0);
+    a.lanes = [LANE_X[near]];
+    if (L >= 4 && Math.random() < 0.45) a.lanes.push(LANE_X[(near + 1 + Math.floor(Math.random() * 2)) % 3]);
+    const z0 = b.z + 1.5, z1 = front + 4;
+    for (const x of a.lanes) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(LANE_HALF * 2, z1 - z0).rotateX(-Math.PI / 2), warnMat());
+      m.position.set(x, 0.06, (z0 + z1) / 2);
+      m.renderOrder = 3;
+      world.add(m);
+      a.marks.push(m);
+    }
+  } else {
+    // throw a boulder at where the squad is now
+    a.x = THREE.MathUtils.clamp(G.sx + (Math.random() - 0.5), -4, 4);
+    a.z = G.sz;
+    a.r = Math.min(2.6, 2 + L * 0.04);
+    const m = new THREE.Mesh(new THREE.CircleGeometry(a.r, 32).rotateX(-Math.PI / 2), warnMat());
+    m.position.set(a.x, 0.06, a.z);
+    m.renderOrder = 3;
+    world.add(m);
+    a.marks.push(m);
+    a.rock = new THREE.Mesh(boulderGeo, mat(0x6f6a64));
+    a.from = new THREE.Vector3(b.x + 1.2, b.scale * 1.6, b.z + 1);
+    world.add(a.rock);
+  }
+  b.atk = a;
+}
+
+function clearBossAttack(b) {
+  if (!b.atk) return;
+  for (const m of b.atk.marks) { world.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  if (b.atk.rock) world.remove(b.atk.rock);
+  b.atk = null;
+}
+
+function updateBossAttack(b, dt) {
+  const a = b.atk;
+  a.t += dt;
+  const k = Math.min(1, a.t / a.dur);
+  for (const m of a.marks) m.material.opacity = 0.2 + 0.35 * Math.abs(Math.sin(a.t * (8 + k * 10)));
+  b.swing = k; // raise the weapon during the wind-up
+  if (a.rock) {
+    a.rock.position.set(
+      THREE.MathUtils.lerp(a.from.x, a.x, k),
+      THREE.MathUtils.lerp(a.from.y, 0.8, k) + Math.sin(Math.PI * k) * 6,
+      THREE.MathUtils.lerp(a.from.z, a.z, k),
+    );
+    a.rock.rotation.x += dt * 6;
+  }
+  if (k < 1) return;
+
+  // strike
+  const hit = (s) => a.type === 'slam'
+    ? a.lanes.some((x) => Math.abs(s.x - x) < LANE_HALF + 0.15)
+    : (s.x - a.x) ** 2 + (s.z - a.z) ** 2 < (a.r + 0.15) ** 2;
+  if (a.type === 'slam') {
+    for (const x of a.lanes) {
+      for (let z = b.z + 2; z < bossFront() + 4; z += 2) burst(x, 0.2, z, [0xbdb8b0, 0x8d8a85], 3, 4, 1);
+    }
+  } else {
+    burst(a.x, 0.5, a.z, [0x6f6a64, 0x8d8a85, 0xbdb8b0], 30, 7, 1.6);
+  }
+  G.shake = 0.55;
+  b.swing = -0.35; // follow-through
+  for (let i = G.soldiers.length - 1; i >= 0; i--) if (hit(G.soldiers[i])) killSoldier(i, true);
+  clearBossAttack(b);
+  b.attackT = Math.max(0.45, 1.5 - G.level * 0.05) * (b.hp < b.maxHp * 0.4 ? 0.65 : 1);
+}
+
 function updateBoss(dt) {
   const b = G.boss;
   if (!b || !b.alive) return;
   b.phase += dt * 4;
   b.punch = Math.max(0, b.punch - dt);
-  b.swing = Math.max(0, b.swing - dt * 3);
+  if (!b.atk) b.swing += (0 - b.swing) * Math.min(1, dt * 4);
   b.g.scale.setScalar(b.scale * (1 + b.punch));
-  if (!b.active || !G.soldiers.length) { animateRig(b.rig, b.phase, 0, b.swing); return; }
+  if (!b.active || !G.soldiers.length || G.state !== 'boss') {
+    if (G.state !== 'boss') clearBossAttack(b);
+    animateRig(b.rig, b.phase, 0, b.swing);
+    return;
+  }
 
-  let front = Infinity;
-  for (const s of G.soldiers) front = Math.min(front, s.z);
-  const stopZ = front - b.r - 0.6;
-  const moving = b.z < stopZ;
-  if (moving) b.z = Math.min(stopZ, b.z + (2.2 + G.level * 0.04) * dt);
-  b.x += (G.sx - b.x) * Math.min(1, dt * 0.8);
+  // walk in, then keep a distance and attack with the weapon
+  const stopZ = bossFront() - 10;
+  const moving = !b.atk && b.z < stopZ;
+  if (moving) b.z = Math.min(stopZ, b.z + (2.4 + G.level * 0.04) * dt);
+  b.x += (G.sx * 0.4 - b.x) * Math.min(1, dt * 0.8);
   b.g.position.set(b.x, 0, b.z);
   animateRig(b.rig, b.phase, moving ? 1 : 0, b.swing);
 
-  if (!moving) {
+  if (b.atk) updateBossAttack(b, dt);
+  else if (b.z > stopZ - 8) {
     b.attackT -= dt;
-    if (b.attackT <= 0) {
-      b.attackT = 0.85;
-      b.swing = 1;
-      G.shake = 0.35;
-      const kills = 1 + Math.floor(G.level / 6);
-      for (let k = 0; k < kills && G.soldiers.length; k++) killSoldier(nearestSoldier(b.x, b.z).i, true);
-    }
+    if (b.attackT <= 0) startBossAttack(b);
   }
 }
 
 function killBoss() {
   const b = G.boss;
   b.alive = false;
+  clearBossAttack(b);
   world.remove(b.g);
   const pal = BOSSES[G.lv.boss.type].pal;
   for (let i = 0; i < 4; i++) burst(b.x, 1 + i, b.z, [0xffffff, pal.skin, pal.shirt], 30, 9, 2.2);
@@ -983,6 +1054,6 @@ async function boot() {
   requestAnimationFrame(frame);
   // debug/testing hook
   window.__game = { get G() { return G; }, save, startRun, buildLevel, addSoldier,
-    sim(sec, bot) { for (let t = 0; t < sec; t += 1 / 60) { if (bot) bot(G); update(1 / 60); updateEffects(1 / 60); } } };
+    sim(sec, bot) { for (let t = 0; t < sec; t += 1 / 60) { if (bot) bot(G); update(1 / 60); updateEffects(1 / 60); updateCamera(1 / 60); } } };
 }
 boot();

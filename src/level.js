@@ -13,7 +13,7 @@ function mulberry32(a) {
 }
 
 export function difficulty(level) {
-  return Math.pow(1.25, level - 1);
+  return Math.pow(1.28, level - 1);
 }
 
 export function generateLevel(level) {
@@ -36,42 +36,43 @@ export function generateLevel(level) {
         events.push({
           type: 'obstacle', kind: crate ? 'crate' : 'barrel',
           x: x + (r() - 0.5) * 0.6, z: z - row * 6,
-          hp: r5((crate ? rint(25, 50) : opening ? rint(10, 25) : rint(10, 40) + row * 25) * D),
+          hp: r5((crate ? rint(25, 50) : opening ? rint(15, 30) : rint(15, 45) + row * 30) * D),
         });
       }
     }
   };
 
   const gates = (z) => {
-    const good = r() < 0.25 && level > 1
+    const good = r() < 0.15 && level > 2
       ? { op: 'mul', val: 2 }
-      : { op: 'add', val: rint(2, 4 + Math.min(level, 8)) };
-    const bad = r() < 0.2
-      ? { op: 'add', val: rint(1, 3) }
-      : { op: 'add', val: -rint(5, 15 + level * 4) };
+      : { op: 'add', val: level === 1 ? rint(3, 5) : rint(2, 3 + Math.min(level, 6)) };
+    const bad = r() < 0.12
+      ? { op: 'add', val: rint(1, 2) }
+      : { op: 'add', val: -rint(8, 18 + level * 5) };
     const flip = r() < 0.5;
     events.push({ type: 'gates', z, left: flip ? good : bad, right: flip ? bad : good });
   };
 
   const enemies = (z) => {
-    const count = Math.min(8 + level * 3 + rint(0, 6), 45);
+    const count = level === 1 ? 8 + rint(0, 4) : Math.min(10 + level * 3 + rint(0, 8), 50);
     const list = [];
     for (let i = 0; i < count; i++) {
       const goblin = level > 1 && r() < 0.45;
       list.push({
         kind: goblin ? 'goblin' : 'zombie',
         x: (r() - 0.5) * 8.6, z: z - r() * 10,
-        hp: Math.ceil((goblin ? 6 : 4) * D),
+        hp: Math.ceil((goblin ? 8 : 5) * D),
       });
     }
-    if (level > 1 && r() < 0.55) {
-      list.push({ kind: 'brute', x: (r() - 0.5) * 5, z: z - 11, hp: Math.ceil(70 * D) });
+    const brutes = level > 1 ? (r() < 0.6 ? 1 : 0) + (level > 5 && r() < 0.5 ? 1 : 0) : 0;
+    for (let b = 0; b < brutes; b++) {
+      list.push({ kind: 'brute', x: (r() - 0.5) * 6, z: z - 11 - b * 3, hp: Math.ceil(90 * D) });
     }
     events.push({ type: 'enemies', z, list });
   };
 
   const tires = (z) => {
-    const base = rint(40, 90) * D;
+    const base = rint(55, 110) * D;
     LANES.forEach((x, i) => events.push({ type: 'obstacle', kind: 'tires', x, z, hp: r5(base * (1 + i * 0.07)) }));
     gates(z - 4.5);
   };
@@ -98,6 +99,6 @@ export function generateLevel(level) {
     level,
     length,
     events,
-    boss: { type: bossType, mega, hp: Math.round(900 * D * (mega ? 1.7 : 1) * (level === 1 ? 0.6 : 1)) },
+    boss: { type: bossType, mega, hp: Math.round(1100 * D * (mega ? 1.7 : 1) * (level === 1 ? 0.5 : 1)) },
   };
 }

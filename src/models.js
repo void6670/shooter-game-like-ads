@@ -150,16 +150,44 @@ export function animateRig(rig, phase, run, swing = 0) {
   if (rig.armed) {
     rig.body.rotation.y = s * 0.05 * run;
   } else {
-    const reach = 1.35 - swing * 2.6;
+    const reach = 1.35 + swing * 1.7; // swing > 0 raises the arms overhead, < 0 follows through
     rig.arms[0].rotation.x = reach + Math.sin(phase * 0.5) * 0.15;
     rig.arms[1].rotation.x = reach - Math.sin(phase * 0.5) * 0.15;
     rig.body.rotation.x = 0.12 + swing * 0.3;
   }
 }
 
+// [handle, head] colors of each boss's weapon
+const BOSS_WEAPONS = {
+  ogre: [0x7a4a25, 0x8d8f93],
+  yeti: [0x6b8fa8, 0xbfe9ff],
+  goblinKing: [0x6b4423, 0xffc61a],
+  mutant: [0x2e1d45, 0xb46cff],
+};
+
+/** A big hammer held in the right hand; it extends the arm so a slam reaches far forward. */
+function buildBossWeapon(type) {
+  const [hc, kc] = BOSS_WEAPONS[type];
+  const w = new THREE.Group();
+  const handle = new THREE.Mesh(geo('wHandle', () => new THREE.CylinderGeometry(0.06, 0.06, 1.1, 8)), mat(hc));
+  handle.position.y = -1.05;
+  w.add(handle);
+  const head = new THREE.Mesh(boxG(0.36, 0.36, 0.62), mat(kc));
+  head.position.y = -1.62;
+  w.add(head);
+  for (const s of [-1, 1]) {
+    const spike = new THREE.Mesh(geo('wSpike', () => new THREE.ConeGeometry(0.08, 0.22, 6)), mat(kc));
+    spike.position.set(0.24 * s, -1.62, 0);
+    spike.rotation.z = -s * Math.PI / 2;
+    w.add(spike);
+  }
+  return w;
+}
+
 export function buildBoss(type) {
   const b = BOSSES[type];
   const g = buildHumanoid(b.pal);
+  g.userData.rig.arms[1].add(buildBossWeapon(type));
   g.scale.setScalar(b.scale);
   return g;
 }

@@ -63,7 +63,7 @@ export function stats() {
   const gun = getGun();
   return {
     gun,
-    damage: 2 * gun.dmg * Math.pow(1.15, save.up.damage),
+    damage: 2 * gun.dmg * Math.pow(1.12, save.up.damage),
     rate: gun.rate * (1 + 0.06 * save.up.rate),
     bullets: gun.bullets,
     spread: gun.spread,
