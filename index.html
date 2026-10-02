@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e88ff" />
+  <title>Bridge Squad</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="c"></canvas>
+
+    <!-- In-game HUD -->
+    <div id="hud">
+      <button id="pauseBtn" class="btn-icon" aria-label="Pause"><span></span><span></span></button>
+      <div id="progress">
+        <div id="progFill"></div>
+        <div id="progText" class="stroke">0%</div>
+        <svg id="flag" viewBox="0 0 32 40" aria-hidden="true">
+          <rect x="3" y="2" width="4" height="36" rx="2" fill="#1e88ff" stroke="#0d2f5c" stroke-width="2" />
+          <path d="M7 4 C14 0 20 9 29 4 L29 20 C20 25 14 16 7 20 Z" fill="#fff" stroke="#0d2f5c" stroke-width="2" />
+        </svg>
+      </div>
+      <div id="levelTag" class="stroke">LEVEL 1</div>
+      <div id="coinBox"><span id="coinText" class="stroke">0</span><div class="coin-icon"></div></div>
+      <div id="coinGain" class="stroke">+0</div>
+      <div id="bossBar">
+        <div id="bossName" class="stroke">BOSS</div>
+        <div class="bar"><div id="bossFill"></div><span id="bossHp" class="stroke">0</span></div>
+      </div>
+      <div id="squadCount" class="stroke">1</div>
+      <div id="banner" class="stroke"></div>
+      <div id="hint" class="stroke"><div class="hand">👆</div>DRAG TO MOVE</div>
+    </div>
+
+    <!-- Home / upgrade screen -->
+    <div id="menu" class="screen">
+      <div class="title stroke">BRIDGE<br />SQUAD</div>
+      <div class="menu-bottom">
+        <div id="menuLevel" class="stroke">LEVEL 1</div>
+        <button id="playBtn" class="btn btn-green stroke">PLAY</button>
+        <div id="upgrades"></div>
+        <button id="gunsBtn" class="btn btn-blue stroke">🔫 GUNS</button>
+      </div>
+    </div>
+
+    <div id="gunShop" class="screen modal">
+      <div class="panel">
+        <div class="panel-title stroke">GUNS</div>
+        <div id="gunList"></div>
+        <button id="gunsClose" class="btn btn-blue stroke">BACK</button>
+      </div>
+    </div>
+
+    <div id="pauseScreen" class="screen modal">
+      <div class="panel">
+        <div class="panel-title stroke">PAUSED</div>
+        <button id="resumeBtn" class="btn btn-green stroke">RESUME</button>
+        <button id="restartBtn" class="btn btn-blue stroke">RESTART</button>
+        <button id="homeBtn" class="btn btn-gray stroke">HOME</button>
+      </div>
+    </div>
+
+    <div id="winScreen" class="screen modal">
+      <div class="panel">
+        <div class="panel-title big stroke">LEVEL<br />COMPLETE!</div>
+        <div class="reward"><span id="winCoins" class="stroke">0</span><div class="coin-icon"></div></div>
+        <button id="nextBtn" class="btn btn-green stroke">CONTINUE</button>
+      </div>
+    </div>
+
+    <div id="loseScreen" class="screen modal">
+      <div class="panel">
+        <div class="panel-title big red stroke">SQUAD<br />DOWN!</div>
+        <div class="reward"><span id="loseCoins" class="stroke">0</span><div class="coin-icon"></div></div>
+        <div class="tip">Upgrade your guns and try again!</div>
+        <button id="retryBtn" class="btn btn-green stroke">RETRY</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
