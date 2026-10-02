@@ -46,6 +46,7 @@ export const PALETTES = {
   zombie:  { helmet: 0xe03a3a, skin: 0xf0b6a8, shirt: 0xf3efe8, pants: 0xd42c2c },
   goblin:  { helmet: 0xe03a3a, skin: 0x86b33b, shirt: 0xf3efe8, pants: 0xd42c2c, ears: true },
   brute:   { helmet: null, skin: 0x5b5b5e, shirt: 0x48484b, pants: 0x38383b, bulky: true },
+  runner:  { helmet: null, skin: 0xebe6d6, shirt: 0x2b2b30, pants: 0x2b2b30, horns: 0xff4a3a },
 };
 
 export const BOSSES = {
@@ -299,7 +300,16 @@ export const coinMat = new THREE.MeshLambertMaterial({ color: 0xffc61a, emissive
 
 // ---------------------------------------------------------------- environment
 
-export function buildBridge(length, startZ = 30) {
+/** Free a bridge built by buildBridge (its geometries and deck texture are its own). */
+export function disposeBridge(g) {
+  g.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material && o.material.userData.own) { o.material.map?.dispose(); o.material.dispose(); }
+  });
+}
+
+/** Bridge from startZ back to -length. `tint` multiplies the deck colour per world. */
+export function buildBridge(length, startZ = 30, tint = 0xffffff) {
   const g = new THREE.Group();
   const total = length + startZ;
   const midZ = startZ - total / 2;
@@ -315,7 +325,9 @@ export function buildBridge(length, startZ = 30) {
   deckTex.wrapS = deckTex.wrapT = THREE.RepeatWrapping;
   deckTex.repeat.set(5.5, total / 2);
   deckTex.anisotropy = 8;
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(11, 0.6, total), new THREE.MeshLambertMaterial({ map: deckTex }));
+  const deckMat = new THREE.MeshLambertMaterial({ map: deckTex, color: tint });
+  deckMat.userData.own = true;
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(11, 0.6, total), deckMat);
   deck.position.set(0, -0.3, midZ);
   g.add(deck);
 
@@ -336,7 +348,7 @@ export function buildBridge(length, startZ = 30) {
   const cablePts = [];
   const towerMat = mat(0xaeadab);
   const topY = 24;
-  for (let z = startZ - 10; z > -length - 40; z -= 75) {
+  for (let z = startZ - 10; z > -length + 5; z -= 75) {
     for (const s of [-1, 1]) {
       const p = new THREE.Mesh(new THREE.BoxGeometry(1.3, 36, 1.5), towerMat);
       p.position.set(s * 7.2, topY - 18 + 2, z);

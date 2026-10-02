@@ -38,8 +38,11 @@
     <div id="menu" class="screen">
       <div class="title stroke">BRIDGE<br />SQUAD</div>
       <div class="menu-bottom">
+        <div id="menuWorld" class="stroke">WORLD 1 · BAY BRIDGE</div>
+        <div id="worldDots" aria-hidden="true"></div>
         <div id="menuLevel" class="stroke">LEVEL 1</div>
         <button id="playBtn" class="btn btn-green stroke">PLAY</button>
+        <button id="endlessBtn" class="btn btn-purple stroke">♾ ENDLESS <span id="endlessBest">NEW!</span></button>
         <div id="upgrades"></div>
         <button id="gunsBtn" class="btn btn-blue stroke">🔫 GUNS</button>
       </div>
@@ -76,6 +79,20 @@
         <div class="reward"><span id="loseCoins" class="stroke">0</span><div class="coin-icon"></div></div>
         <div class="tip">Upgrade your guns and try again!</div>
         <button id="retryBtn" class="btn btn-green stroke">RETRY</button>
+      </div>
+    </div>
+
+    <div id="endlessScreen" class="screen modal">
+      <div class="panel">
+        <div class="panel-title big stroke">RUN OVER</div>
+        <div id="runDist" class="run-dist stroke">0m</div>
+        <div id="runBest" class="tip stroke">BEST 0m</div>
+        <div class="run-stats">
+          <div><span class="lbl">BOSSES</span><span id="runBosses" class="stroke">0</span></div>
+          <div><span class="lbl">COINS</span><span id="runCoins" class="stroke">+0</span></div>
+        </div>
+        <button id="endlessAgain" class="btn btn-purple stroke">RUN AGAIN</button>
+        <button id="endlessHome" class="btn btn-gray stroke">HOME</button>
       </div>
     </div>
   </div>

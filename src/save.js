@@ -21,6 +21,7 @@ export const UPGRADES = {
 const defaults = () => ({
   coins: 0,
   level: 1,
+  best: 0,
   gun: 'pistol',
   owned: ['pistol'],
   up: { damage: 0, rate: 0, soldiers: 0, income: 0 },

@@ -66,7 +66,7 @@ button { font-family: inherit; cursor: pointer; border: 0; color: #fff; }
 #progText { position: absolute; inset: 0; text-align: center; font-size: 5.4cqw; line-height: 5.2cqw; }
 #flag { position: absolute; right: -6cqw; top: -4cqw; width: 8cqw; }
 
-#levelTag { left: 21%; width: 37%; top: calc(4.2% + 6.5cqw); text-align: center; font-size: 4cqw; opacity: .9; }
+#levelTag { white-space: nowrap; left: 21%; width: 37%; top: calc(4.2% + 6.5cqw); text-align: center; font-size: 4cqw; opacity: .9; }
 
 #coinBox {
   right: 4%; top: 3%;
@@ -110,7 +110,9 @@ button { font-family: inherit; cursor: pointer; border: 0; color: #fff; }
 #banner {
   left: 0; right: 0; top: 34%;
   text-align: center;
-  font-size: 12cqw;
+  font-size: 11cqw;
+  line-height: 1.05;
+  padding: 0 4cqw;
   opacity: 0;
   transform: scale(.5);
   color: #fff;
@@ -153,7 +155,7 @@ button { font-family: inherit; cursor: pointer; border: 0; color: #fff; }
 .btn-gray { background: linear-gradient(#a7b3bf, #6f7c89); border: 3px solid #3a4550; box-shadow: 0 5px 0 #3a4550; }
 .btn[disabled] { filter: grayscale(.9) brightness(.85); }
 
-#menu { justify-content: space-between; padding: 22% 0 5%; background: linear-gradient(rgba(8,20,35,0) 55%, rgba(8,20,35,.55)); }
+#menu { justify-content: space-between; padding: 16% 0 4%; background: linear-gradient(rgba(8,20,35,0) 55%, rgba(8,20,35,.55)); }
 #menu .title { font-size: 15cqw; line-height: .95; text-align: center; color: #fff; transform: rotate(-4deg); text-shadow: 0 1.4cqw 0 var(--ink); }
 #menu .title { animation: pop .6s ease-out; }
 .menu-bottom { display: flex; flex-direction: column; align-items: center; width: 100%; }
@@ -221,3 +223,21 @@ button { font-family: inherit; cursor: pointer; border: 0; color: #fff; }
   -webkit-text-stroke: 0.16em var(--ink); paint-order: stroke fill;
 }
 .gun-swatch { width: 9cqw; height: 4cqw; border-radius: 3px; border: 2px solid var(--ink); }
+
+/* ---------------------------------------------------------------- worlds & endless */
+#menuWorld { font-size: 5cqw; opacity: .95; letter-spacing: .03em; }
+#worldDots { display: flex; gap: 1.4cqw; margin: 1.4cqw 0 1cqw; }
+#worldDots span {
+  width: 3.4cqw; height: 3.4cqw; border-radius: 50%;
+  background: rgba(255, 255, 255, .35); border: 2px solid var(--ink);
+}
+#worldDots span.boss { border-radius: 25%; }
+#worldDots span.done { background: var(--green); }
+#worldDots span.now { background: var(--gold); transform: scale(1.3); }
+.btn-purple { background: linear-gradient(#b48cff, #7b4ae0); border: 3px solid #3f1f86; box-shadow: 0 5px 0 #3f1f86; }
+#endlessBtn { font-size: 6cqw; min-width: 60cqw; padding: 1.8cqw 5cqw; }
+#endlessBtn span { font-size: 4cqw; opacity: .9; margin-left: 1.5cqw; }
+.run-dist { font-size: 16cqw; line-height: 1; color: #fff; }
+.run-stats { display: flex; gap: 8cqw; margin: 1cqw 0 4cqw; }
+.run-stats > div { display: flex; flex-direction: column; align-items: center; font-size: 8cqw; }
+.run-stats .lbl { font-size: 3.6cqw; opacity: .7; }

@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import '@fontsource/lilita-one';
 import {
   buildHumanoid, animateRig, buildBoss, buildBarrel, buildCrate, buildTires, buildGatePanel, setGateColor,
-  buildBridge, coinGeo, coinMat, PALETTES, BOSSES, mat,
+  buildBridge, disposeBridge, coinGeo, coinMat, PALETTES, BOSSES, mat,
 } from './models.js';
 import { Label, textSprite } from './text.js';
-import { generateLevel } from './level.js';
+import { generateLevel, createGenerator, bossFor, worldOf, WORLDS, LEVELS_PER_WORLD } from './level.js';
 import { save, persist, GUNS, UPGRADES, upgradeCost, isMaxed, stats, fmt } from './save.js';
 
 const RUN_SPEED = 6.5;
@@ -15,6 +15,8 @@ const MAX_SOLDIERS = 50;
 const MAX_BULLETS = 2000;
 const MAX_PARTICLES = 900;
 const ROAD_HALF = 4.9;
+const ENDLESS_BOSS_GAP = 420;   // metres between endless bosses
+const BRIDGE_SEG = 300;
 const $ = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------- renderer / scene
@@ -28,7 +30,8 @@ scene.background = new THREE.Color(0x56aee8);
 scene.fog = new THREE.Fog(0x8fcbf0, 70, 150);
 const camera = new THREE.PerspectiveCamera(60, 0.5, 0.1, 400);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa7b5, 1.7));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x9aa7b5, 1.7);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.9);
 sun.position.set(6, 14, 8);
 scene.add(sun);
@@ -36,6 +39,15 @@ scene.add(sun);
 const sea = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2b8ad8 }));
 sea.position.y = -9;
 scene.add(sea);
+
+function applyWorld(w) {
+  scene.background.set(w.sky);
+  scene.fog.color.set(w.fog);
+  sea.material.color.set(w.sea);
+  hemi.intensity = w.hemi;
+  sun.color.set(w.sun);
+  sun.intensity = w.sunI;
+}
 
 function resize() {
   const w = app.clientWidth, h = app.clientHeight;
@@ -128,8 +140,11 @@ function newLabel(w, h, opts) {
   return l;
 }
 
-function buildLevel() {
-  if (world) scene.remove(world);
+function buildLevel(mode = 'level') {
+  if (world) {
+    world.traverse((o) => { if (o.userData.bridge) disposeBridge(o); });
+    scene.remove(world);
+  }
   for (const l of labels) l.dispose();
   labels.length = 0;
   bullets.length = 0;
@@ -139,34 +154,118 @@ function buildLevel() {
 
   world = new THREE.Group();
   scene.add(world);
-  const lv = generateLevel(save.level);
+  const endless = mode === 'endless';
+  const lv = endless ? null : generateLevel(save.level);
   const st = stats();
   G = {
-    level: save.level, lv, st,
+    mode, level: endless ? 1 : save.level, lv, st,
     state: 'menu',
-    sx: 0, sz: 0, endZ: -lv.length,
-    soldiers: [], enemies: [], obstacles: [], gates: [], coinGates: [], fading: [],
-    boss: null,
+    sx: 0, sz: 0, endZ: endless ? -ENDLESS_BOSS_GAP : -lv.length,
+    soldiers: [], enemies: [], obstacles: [], gates: [], coinGates: [], fading: [], bridges: [],
+    boss: null, bossNum: 0,
     coinMult: 1, rateMult: 1, dmgMult: 1, crateBuffs: 0,
     earned: 0, gain: 0, gainT: 0,
-    time: 0, shake: 0, endTimer: -1,
+    time: 0, shake: 0, endTimer: -1, cleanT: 0,
   };
   bulletMesh.material.color.set(st.gun.bullet);
 
-  world.add(buildBridge(lv.length + 140));
-  for (const ev of lv.events) {
-    if (ev.type === 'obstacle') addObstacle(ev);
-    else if (ev.type === 'gates') addGates(ev);
-    else if (ev.type === 'enemies') ev.list.forEach(addEnemy);
-    else if (ev.type === 'coingate') addCoinGate(ev);
+  if (endless) {
+    G.world = WORLDS[0];
+    G.gen = createGenerator((Math.random() * 1e9) | 0);
+    G.genZ = G.gen.opening(-26);
+    spawnEvents(G.gen.events);
+    G.bridgeEnd = 30;
+    streamEndless();
+  } else {
+    G.world = lv.world;
+    const bridge = buildBridge(lv.length + 140, 30, G.world.deck);
+    bridge.userData.bridge = true;
+    world.add(bridge);
+    spawnEvents(lv.events);
+    addBoss(lv.boss, G.endZ - 24);
   }
-  addBoss(lv.boss);
+  applyWorld(G.world);
   for (let i = 0; i < st.startSoldiers; i++) addSoldier();
   for (const s of G.soldiers) { const p = slot(G.soldiers.indexOf(s)); s.x = p.x; s.z = p.z; }
 
   snapCamera();
   $('bossBar').classList.remove('show');
   updateHUD(0);
+}
+
+function spawnEvents(events) {
+  for (const ev of events) {
+    if (ev.type === 'obstacle') addObstacle(ev);
+    else if (ev.type === 'gates') addGates(ev);
+    else if (ev.type === 'enemies') ev.list.forEach(addEnemy);
+    else if (ev.type === 'coingate') addCoinGate(ev);
+  }
+  events.length = 0;
+}
+
+// ---------------------------------------------------------------- endless streaming
+/** Difficulty level at a given z: ramps with distance, and with each boss beaten. */
+function endlessLevel(z) {
+  return 1 + (-z) / 140;
+}
+
+function streamEndless() {
+  // bridge segments ahead, drop the ones far behind
+  while (G.bridgeEnd > G.sz - 220) {
+    const seg = buildBridge(-(G.bridgeEnd - BRIDGE_SEG), G.bridgeEnd, G.world.deck);
+    seg.userData.bridge = true;
+    world.add(seg);
+    G.bridges.push({ g: seg, end: G.bridgeEnd - BRIDGE_SEG });
+    G.bridgeEnd -= BRIDGE_SEG;
+  }
+  while (G.bridges.length && G.bridges[0].end > G.sz + 60) {
+    const b = G.bridges.shift();
+    world.remove(b.g);
+    disposeBridge(b.g);
+  }
+  // events ahead; leave the boss arena empty
+  while (G.genZ > G.sz - 130) {
+    if (G.genZ < G.endZ + 30 && G.genZ > G.endZ - 50) {
+      if (!G.boss) addBoss(bossFor(endlessLevel(G.endZ)), G.endZ - 24);
+      G.genZ = G.endZ - 55;
+      continue;
+    }
+    G.gen.level = endlessLevel(G.genZ);
+    G.genZ = G.gen.next(G.genZ, 1);
+    spawnEvents(G.gen.events);
+  }
+}
+
+function removeLabel(l) {
+  const i = labels.indexOf(l);
+  if (i >= 0) labels.splice(i, 1);
+  l.dispose();
+}
+
+/** Drop everything the squad has left behind (keeps endless runs light). */
+function cleanup() {
+  const behind = G.sz + 14;
+  G.obstacles = G.obstacles.filter((o) => {
+    if (o.alive && o.z < behind) return true;
+    if (o.alive) world.remove(o.g);
+    removeLabel(o.label);
+    return false;
+  });
+  G.enemies = G.enemies.filter((e) => {
+    if (e.alive) return true;
+    return false;
+  });
+  G.gates = G.gates.filter((g) => {
+    if (!g.passed || g.z < behind) return true;
+    for (const h of g.halves) { world.remove(h.g); removeLabel(h.label); }
+    return false;
+  });
+  G.coinGates = G.coinGates.filter((c) => {
+    if (!c.passed || c.z < behind) return true;
+    world.remove(c.g);
+    removeLabel(c.label);
+    return false;
+  });
 }
 
 // ---------------------------------------------------------------- soldiers
@@ -305,6 +404,7 @@ function updateBullets(dt, collide) {
 
 function onHit(t, b) {
   const o = t.ref;
+  if (o.alive === false) return; // already destroyed by an earlier bullet this frame
   switch (t.kind) {
     case 'obs': {
       o.hp -= b.dmg;
@@ -360,7 +460,7 @@ function addObstacle(ev) {
   g.add(label.mesh);
   g.position.set(ev.x, 0, ev.z);
   world.add(g);
-  G.obstacles.push({ kind: ev.kind, x: ev.x, z: ev.z, w, d, hp: ev.hp, maxHp: ev.hp, g, label, alive: true, punch: 0 });
+  G.obstacles.push({ kind: ev.kind, x: ev.x, z: ev.z, w, d, hp: ev.hp, maxHp: ev.hp, g, label, alive: true, punch: 0, move: ev.move || 0, movePhase: ev.movePhase || 0 });
 }
 
 const CRATE_BUFFS = [
@@ -456,15 +556,17 @@ function checkGates() {
 // ---------------------------------------------------------------- enemies
 function addEnemy(e) {
   const brute = e.kind === 'brute';
+  const runner = e.kind === 'runner';
   const g = buildHumanoid(PALETTES[e.kind]);
-  if (brute) g.scale.setScalar(1.7);
+  const scale = brute ? 1.7 : runner ? 0.9 : 1;
+  g.scale.setScalar(scale);
   g.rotation.y = Math.PI;
   g.position.set(e.x, 0, e.z);
   world.add(g);
   const en = {
     kind: e.kind, x: e.x, z: e.z, hp: e.hp, maxHp: e.hp, g, rig: g.userData.rig,
-    r: brute ? 0.75 : 0.38, speed: brute ? 1.8 : 2.2 + Math.random() * 1.0,
-    active: false, alive: true, phase: Math.random() * 6, punch: 0, scale: brute ? 1.7 : 1, bar: null,
+    r: brute ? 0.75 : 0.38, speed: brute ? 1.8 : runner ? 4.6 : 2.2 + Math.random() * 1.0,
+    active: false, alive: true, phase: Math.random() * 6, punch: 0, scale, bar: null,
   };
   if (brute) en.bar = hpBar(g, 2.15, 0.9);
   G.enemies.push(en);
@@ -542,18 +644,17 @@ function obstacleCollisions() {
 }
 
 // ---------------------------------------------------------------- boss
-function addBoss(cfg) {
+function addBoss(cfg, z) {
   const def = BOSSES[cfg.type];
   const g = buildBoss(cfg.type);
   const scale = def.scale * (cfg.mega ? 1.2 : 1);
   g.scale.setScalar(scale);
   g.rotation.y = Math.PI;
-  const z = G.endZ - 24;
   g.position.set(0, 0, z);
   world.add(g);
   G.boss = {
     name: (cfg.mega ? 'MEGA ' : '') + def.name, g, rig: g.userData.rig,
-    hp: cfg.hp, maxHp: cfg.hp, x: 0, z, r: 0.42 * scale, scale,
+    type: cfg.type, hp: cfg.hp, maxHp: cfg.hp, x: 0, z, r: 0.42 * scale, scale,
     alive: true, active: false, attackT: 1.2, swing: 0, phase: 0, punch: 0, atk: null,
   };
 }
@@ -687,12 +788,27 @@ function killBoss() {
   b.alive = false;
   clearBossAttack(b);
   world.remove(b.g);
-  const pal = BOSSES[G.lv.boss.type].pal;
+  const pal = BOSSES[b.type].pal;
   for (let i = 0; i < 4; i++) burst(b.x, 1 + i, b.z, [0xffffff, pal.skin, pal.shirt], 30, 9, 2.2);
   G.shake = 0.6;
   addCoins(coinUnit() * 40, { x: b.x, y: 3, z: b.z });
   $('bossBar').classList.remove('show');
-  win();
+  if (G.mode === 'endless') {
+    // keep running: next stretch, next world
+    G.bossNum++;
+    G.boss = null;
+    G.gen.coinGates = 0; // one coin gate per stretch
+    G.coinMult = 1;
+    G.endZ -= ENDLESS_BOSS_GAP;
+    G.world = WORLDS[G.bossNum % WORLDS.length];
+    applyWorld(G.world);
+    G.state = 'play';
+    showBanner('BOSS DOWN!', 'gold');
+    const name = G.world.name;
+    setTimeout(() => { if (G.mode === 'endless' && G.state === 'play') showBanner(name); }, 1800);
+  } else {
+    win();
+  }
 }
 
 // ---------------------------------------------------------------- flow
@@ -709,6 +825,10 @@ function win() {
 function fail() {
   if (G.state === 'win' || G.state === 'lose' || G.state === 'menu') return;
   G.state = 'lose';
+  if (G.mode === 'endless') {
+    G.newBest = distance() > save.best;
+    save.best = Math.max(save.best, distance());
+  }
   persist();
   $('bossBar').classList.remove('show');
   G.endTimer = 1.2;
@@ -718,6 +838,12 @@ function showEndScreen() {
   if (G.state === 'win') {
     $('winCoins').textContent = '+' + fmt(G.earned);
     show('winScreen');
+  } else if (G.mode === 'endless') {
+    $('runDist').textContent = distance() + 'm';
+    $('runBest').textContent = (G.newBest ? 'NEW BEST! ' : 'BEST ') + save.best + 'm';
+    $('runBosses').textContent = G.bossNum;
+    $('runCoins').textContent = '+' + fmt(G.earned);
+    show('endlessScreen');
   } else {
     $('loseCoins').textContent = '+' + fmt(G.earned);
     show('loseScreen');
@@ -731,6 +857,8 @@ function startRun() {
   $('hint').classList.toggle('show', save.level <= 2);
   setTimeout(() => $('hint').classList.remove('show'), 3000);
 }
+
+function distance() { return Math.max(0, Math.floor(-G.sz)); }
 
 function goHome() {
   buildLevel();
@@ -747,8 +875,14 @@ function update(dt) {
 
   if (running) {
     G.sz -= RUN_SPEED * dt;
-    if (G.sz <= G.endZ) { G.sz = G.endZ; startBoss(); }
+    if (G.sz <= G.endZ && G.boss) { G.sz = G.endZ; startBoss(); }
   }
+  if (G.mode === 'endless') {
+    G.level = Math.floor(endlessLevel(G.sz));
+    if (G.state !== 'lose') streamEndless();
+  }
+  G.cleanT -= dt;
+  if (G.cleanT <= 0) { G.cleanT = 0.5; cleanup(); }
   if (fighting) {
     if (keys.left) G.sx -= 9 * dt;
     if (keys.right) G.sx += 9 * dt;
@@ -769,6 +903,11 @@ function update(dt) {
     if (!o.alive) continue;
     o.punch = Math.max(0, o.punch - dt);
     o.g.scale.setScalar(1 + o.punch);
+    if (o.move) {
+      o.x = Math.sin(G.time * 1.5 + o.movePhase) * o.move;
+      o.g.position.x = o.x;
+      o.g.rotation.x += dt * 2 * Math.cos(G.time * 1.5 + o.movePhase); // rolls as it slides
+    }
     if (o.g.userData.icon) {
       o.g.userData.icon.rotation.y += dt * 2;
       o.g.userData.icon.position.y = 2.3 + Math.sin(G.time * 3) * 0.12;
@@ -882,10 +1021,18 @@ const hud = {
 const projV = new THREE.Vector3();
 
 function updateHUD(dt) {
-  const pct = Math.round(THREE.MathUtils.clamp(G.sz / G.endZ, 0, 1) * 100);
-  hud.progFill.style.width = pct + '%';
-  hud.progText.textContent = pct + '%';
-  hud.levelTag.textContent = 'LEVEL ' + G.level;
+  if (G.mode === 'endless') {
+    const start = G.endZ + ENDLESS_BOSS_GAP;
+    const pct = THREE.MathUtils.clamp((G.sz - start) / (G.endZ - start), 0, 1) * 100;
+    hud.progFill.style.width = pct + '%';
+    hud.progText.textContent = distance() + 'm';
+    hud.levelTag.textContent = 'BEST ' + save.best + 'm';
+  } else {
+    const pct = Math.round(THREE.MathUtils.clamp(G.sz / G.endZ, 0, 1) * 100);
+    hud.progFill.style.width = pct + '%';
+    hud.progText.textContent = pct + '%';
+    hud.levelTag.textContent = 'LEVEL ' + G.level;
+  }
   hud.coinText.textContent = fmt(save.coins);
 
   G.gainT -= dt;
@@ -897,7 +1044,7 @@ function updateHUD(dt) {
     G.gain = 0;
   }
 
-  if (G.boss) {
+  if (G.boss && G.boss.alive) {
     hud.bossFill.style.width = Math.max(0, G.boss.hp / G.boss.maxHp * 100) + '%';
     hud.bossHp.textContent = fmt(Math.max(0, Math.ceil(G.boss.hp)));
   }
@@ -924,12 +1071,23 @@ function showBanner(text, cls = '') {
 }
 
 // ---------------------------------------------------------------- menus
-const SCREENS = ['menu', 'gunShop', 'pauseScreen', 'winScreen', 'loseScreen'];
+const SCREENS = ['menu', 'gunShop', 'pauseScreen', 'winScreen', 'loseScreen', 'endlessScreen'];
 function show(id) { for (const s of SCREENS) $(s).classList.toggle('show', s === id); }
 function hideAll() { show(null); }
 
 function renderMenu() {
+  const w = worldOf(save.level);
   $('menuLevel').textContent = 'LEVEL ' + save.level;
+  $('menuWorld').textContent = `WORLD ${w.index + 1} · ${w.name}`;
+  const dots = $('worldDots');
+  dots.innerHTML = '';
+  for (let i = 1; i <= LEVELS_PER_WORLD; i++) {
+    const d = document.createElement('span');
+    d.className = i < w.stage ? 'done' : i === w.stage ? 'now' : '';
+    if (i % 5 === 0) d.classList.add('boss');
+    dots.appendChild(d);
+  }
+  $('endlessBest').textContent = save.best ? `BEST ${save.best}m` : 'NEW!';
   const box = $('upgrades');
   box.innerHTML = '';
   for (const [key, u] of Object.entries(UPGRADES)) {
@@ -985,6 +1143,9 @@ function renderGuns() {
 }
 
 $('playBtn').onclick = startRun;
+$('endlessBtn').onclick = () => { buildLevel('endless'); startRun(); };
+$('endlessAgain').onclick = () => { buildLevel('endless'); startRun(); };
+$('endlessHome').onclick = goHome;
 $('gunsBtn').onclick = () => { renderGuns(); show('gunShop'); };
 $('gunsClose').onclick = () => { renderMenu(); show('menu'); };
 $('pauseBtn').onclick = () => {
@@ -993,7 +1154,7 @@ $('pauseBtn').onclick = () => {
   show('pauseScreen');
 };
 $('resumeBtn').onclick = () => { paused = false; hideAll(); };
-$('restartBtn').onclick = () => { paused = false; persist(); buildLevel(); startRun(); };
+$('restartBtn').onclick = () => { paused = false; persist(); buildLevel(G.mode); startRun(); };
 $('homeBtn').onclick = () => { persist(); goHome(); };
 $('nextBtn').onclick = goHome;
 $('retryBtn').onclick = goHome;
